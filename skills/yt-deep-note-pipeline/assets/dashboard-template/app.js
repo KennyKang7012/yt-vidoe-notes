@@ -3,10 +3,13 @@ const detailPanel = document.getElementById("detailPanel");
 const searchInput = document.getElementById("searchInput");
 const tagFilters = document.getElementById("tagFilters");
 const noteCount = document.getElementById("noteCount");
+const undoPinnedBtn = document.getElementById("undoPinnedBtn");
+const undoInfo = document.getElementById("undoInfo");
 
 let allNotes = [];
 let activeTag = "";
 let selectedNoteId = "";
+let undoState = { can_undo: false };
 
 const API_BASE = "../../../../api";
 
@@ -18,6 +21,31 @@ const readMarkdown = async (path) => {
 
 const escapeHtml = (text) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+const renderUndoPanel = () => {
+  if (!undoPinnedBtn || !undoInfo) return;
+
+  if (undoState && undoState.can_undo) {
+    undoPinnedBtn.disabled = false;
+    const title = undoState.note_title || undoState.note_id || "recent deleted note";
+    undoInfo.textContent = `可還原：${title}`;
+  } else {
+    undoPinnedBtn.disabled = true;
+    undoInfo.textContent = "目前沒有可還原的刪除。";
+  }
+};
+
+const loadUndoState = async () => {
+  try {
+    const resp = await fetch(`${API_BASE}/revert-delete-state`);
+    if (!resp.ok) throw new Error("Failed to load undo state");
+    const data = await resp.json();
+    undoState = data || { can_undo: false };
+  } catch {
+    undoState = { can_undo: false };
+  }
+  renderUndoPanel();
+};
 
 const renderTags = (notes) => {
   const tags = [...new Set(notes.flatMap((n) => n.tags || []))].sort();
@@ -51,6 +79,50 @@ const render = () => {
   renderList(notes);
 };
 
+const undoDelete = async () => {
+  if (!undoState || !undoState.can_undo) {
+    window.alert("目前沒有可還原的刪除。");
+    return;
+  }
+
+  const hash = undoState.delete_commit_hash || "";
+  const ok = window.confirm(`要還原最近一次刪除嗎？\n\nDelete commit: ${hash}`);
+  if (!ok) return;
+
+  if (undoPinnedBtn) {
+    undoPinnedBtn.disabled = true;
+    undoPinnedBtn.textContent = "Undoing...";
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}/revert-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commit_hash: hash }),
+    });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${resp.status}`);
+    }
+
+    await load();
+    await loadUndoState();
+
+    detailPanel.innerHTML = `
+      <h2>還原完成</h2>
+      <p class="meta">Reverted commit: <code>${payload.reverted_commit}</code></p>
+      <p class="meta">New commit: <code>${payload.new_commit}</code></p>
+    `;
+  } catch (err) {
+    window.alert(`還原失敗：${err.message}`);
+    await loadUndoState();
+  } finally {
+    if (undoPinnedBtn) {
+      undoPinnedBtn.textContent = "Undo Delete";
+    }
+  }
+};
+
 const deleteNote = async (note, event) => {
   if (event) {
     event.preventDefault();
@@ -78,15 +150,19 @@ const deleteNote = async (note, event) => {
     if (selectedNoteId === note.id) {
       selectedNoteId = "";
       const gitMeta = payload.git && payload.git.committed
-        ? `<p class="meta">Git commit: <code>${payload.git.hash}</code></p>`
+        ? `<p class="meta">Delete commit: <code>${payload.git.hash}</code></p>`
         : "";
       detailPanel.innerHTML = `
-        <h2>????</h2>
-        <p class="meta">????${note.title}</p>
+        <h2>刪除完成</h2>
+        <p class="meta">已刪除：${note.title}</p>
         ${gitMeta}
       `;
     }
 
+    if (payload.undo_state) {
+      undoState = payload.undo_state;
+    }
+    renderUndoPanel();
     render();
   } catch (err) {
     buttons.forEach((btn) => {
@@ -167,7 +243,12 @@ const load = async () => {
   }
 };
 
+if (undoPinnedBtn) {
+  undoPinnedBtn.onclick = () => undoDelete();
+}
+
 searchInput.addEventListener("input", render);
-load().catch((err) => {
+
+Promise.all([load(), loadUndoState()]).catch((err) => {
   detailPanel.innerHTML = `<h2>Error</h2><p class="meta">${err.message}</p>`;
 });

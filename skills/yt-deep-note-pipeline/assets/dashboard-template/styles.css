@@ -149,3 +149,42 @@ body {
     min-height: 320px;
   }
 }
+
+
+.btn-secondary {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: #eef3ff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #e2ebff;
+}
+
+
+.undo-panel {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafcff;
+}
+
+#undoPinnedBtn {
+  width: 100%;
+}
+
+#undoPinnedBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+#undoInfo {
+  margin: 8px 0 0;
+}

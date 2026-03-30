@@ -12,6 +12,10 @@
       <h1>YT 深度閱讀</h1>
       <input id="searchInput" type="search" placeholder="搜尋標題、摘要、標籤..." />
       <p id="noteCount"></p>
+      <div id="undoPanel" class="undo-panel">
+        <button id="undoPinnedBtn" class="btn-secondary" type="button" disabled>Undo Delete</button>
+        <p id="undoInfo" class="meta">目前沒有可還原的刪除。</p>
+      </div>
       <div id="tagFilters" class="tags"></div>
     </aside>
     <main class="main">

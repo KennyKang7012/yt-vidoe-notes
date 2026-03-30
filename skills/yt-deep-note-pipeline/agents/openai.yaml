@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: "YT Deep Note Pipeline"
+  short_description: "Build zh-TW transcript and deep notes."
+  default_prompt: "Convert a YouTube URL or MP4 into a timestamped Traditional Chinese transcript and deep-reading markdown note."

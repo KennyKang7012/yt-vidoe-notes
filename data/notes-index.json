@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "id": "note-20260330095505",
+    "title": "忘掉 ChatGPT 吧！Claude Cowork + Skills 自動化工作流｜深度閱讀筆記",
+    "date": "2026-03-30",
+    "tags": [
+      "youtube",
+      "deep-reading",
+      "zh-TW",
+      "ai-automation",
+      "claude"
+    ],
+    "summary": "這支影片示範如何把 Claude Cowork、聯結器、排程任務、Skills、子代理與視覺化輸出串成一套可落地的 AI 自動化工作流。",
+    "markdown_path": "notes/2026/2026-03-30-a5OTTbSCpO8-deep-reading.md",
+    "source_type": "youtube",
+    "source_value": "https://www.youtube.com/watch?v=a5OTTbSCpO8&t=16s",
+    "duration_seconds": 1096,
+    "created_at": "2026-03-30T09:55:05.270988+08:00"
+  }
+]

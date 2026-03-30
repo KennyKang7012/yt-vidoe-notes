@@ -4,20 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YT 深度閱讀儀表板</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23181c2f'/%3E%3Cpath d='M16 20h32v6H35v20h-6V26H16z' fill='%23ffffff'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%230f172a'/%3E%3Cstop offset='1' stop-color='%23334155'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M14 20h36v6H35v20h-6V26H14z' fill='%23f8fafc'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <aside class="sidebar">
-      <h1>YT 深度閱讀</h1>
-      <input id="searchInput" type="search" placeholder="搜尋標題、摘要、標籤..." />
-      <p id="noteCount"></p>
-      <div id="undoPanel" class="undo-panel">
-        <button id="undoPinnedBtn" class="btn-secondary" type="button" disabled>Undo Delete</button>
-        <p id="undoInfo" class="meta">目前沒有可還原的刪除。</p>
+      <div class="brand">
+        <h1>YT 深度閱讀</h1>
+        <p>學習筆記控制台</p>
       </div>
+
+      <div class="search-box">
+        <input id="searchInput" type="search" placeholder="搜尋標題、摘要、標籤..." />
+      </div>
+
+      <div class="stat-card">
+        <span>目前筆記</span>
+        <strong id="noteCount">Notes 0 / 0</strong>
+      </div>
+
+      <div id="undoPanel" class="undo-panel">
+        <p class="panel-title">Undo Delete</p>
+        <select id="undoSelect" class="undo-select" disabled>
+          <option value="">目前沒有可還原的刪除</option>
+        </select>
+        <button id="undoPinnedBtn" class="btn-secondary" type="button" disabled>Undo Selected</button>
+        <p id="undoInfo" class="meta">可保留最近 10 筆刪除記錄。</p>
+      </div>
+
       <div id="tagFilters" class="tags"></div>
     </aside>
+
     <main class="main">
       <section id="listPanel" class="list-panel"></section>
       <article id="detailPanel" class="detail-panel">
@@ -25,6 +42,7 @@
         <p>左側選擇卡片後會載入 Markdown 內容。</p>
       </article>
     </main>
+
     <script src="./app.js"></script>
   </body>
 </html>

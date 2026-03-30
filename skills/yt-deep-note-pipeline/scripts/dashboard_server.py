@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[3]
 INDEX_PATH = ROOT / "data" / "notes-index.json"
 UNDO_STATE_PATH = ROOT / "data" / "dashboard-undo-state.json"
 AUTO_GIT_COMMIT = True
+UNDO_MAX_ENTRIES = 10
 
 
 def _load_notes() -> list[dict]:
@@ -41,37 +42,99 @@ def _write_notes(notes: list[dict]) -> None:
     INDEX_PATH.write_text(json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _normalize_undo_entries(entries: object) -> list[dict]:
+    if not isinstance(entries, list):
+        return []
+
+    normalized: list[dict] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        commit_hash = str(item.get("delete_commit_hash") or "").strip()
+        if not commit_hash:
+            continue
+        normalized.append(
+            {
+                "delete_commit_hash": commit_hash,
+                "note_id": str(item.get("note_id") or "").strip(),
+                "note_title": str(item.get("note_title") or "").strip(),
+                "created_at": str(item.get("created_at") or "").strip(),
+            }
+        )
+    return normalized
+
+
 def _load_undo_state() -> dict:
     if not UNDO_STATE_PATH.exists():
-        return {"can_undo": False}
+        return {"can_undo": False, "max_entries": UNDO_MAX_ENTRIES, "entries": []}
+
     raw = UNDO_STATE_PATH.read_text(encoding="utf-8-sig").strip()
     if not raw:
-        return {"can_undo": False}
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        return {"can_undo": False}
+        return {"can_undo": False, "max_entries": UNDO_MAX_ENTRIES, "entries": []}
 
-    commit_hash = str(parsed.get("delete_commit_hash") or "").strip()
-    if not commit_hash:
-        return {"can_undo": False}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"can_undo": False, "max_entries": UNDO_MAX_ENTRIES, "entries": []}
 
+    entries: list[dict]
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("entries"), list):
+            entries = _normalize_undo_entries(parsed.get("entries"))
+        else:
+            # backward compatibility: old single-entry format
+            single = {
+                "delete_commit_hash": str(parsed.get("delete_commit_hash") or "").strip(),
+                "note_id": str(parsed.get("note_id") or "").strip(),
+                "note_title": str(parsed.get("note_title") or "").strip(),
+                "created_at": str(parsed.get("created_at") or "").strip(),
+            }
+            entries = [single] if single["delete_commit_hash"] else []
+    else:
+        entries = []
+
+    entries = entries[:UNDO_MAX_ENTRIES]
     return {
-        "can_undo": True,
-        "delete_commit_hash": commit_hash,
-        "note_id": str(parsed.get("note_id") or ""),
-        "note_title": str(parsed.get("note_title") or ""),
-        "created_at": str(parsed.get("created_at") or ""),
+        "can_undo": len(entries) > 0,
+        "max_entries": UNDO_MAX_ENTRIES,
+        "entries": entries,
     }
 
 
-def _write_undo_state(state: dict) -> None:
+def _write_undo_state(entries: list[dict]) -> None:
+    entries = _normalize_undo_entries(entries)[:UNDO_MAX_ENTRIES]
     UNDO_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    UNDO_STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = {
+        "max_entries": UNDO_MAX_ENTRIES,
+        "entries": entries,
+    }
+    UNDO_STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _clear_undo_state() -> None:
-    if UNDO_STATE_PATH.exists():
-        UNDO_STATE_PATH.unlink()
+def _append_undo_entry(commit_hash: str, note_id: str, note_title: str) -> None:
+    state = _load_undo_state()
+    entries = state.get("entries", []) if isinstance(state, dict) else []
+    entries = _normalize_undo_entries(entries)
+
+    # de-duplicate by commit hash
+    entries = [e for e in entries if e.get("delete_commit_hash") != commit_hash]
+    entries.insert(
+        0,
+        {
+            "delete_commit_hash": commit_hash,
+            "note_id": note_id,
+            "note_title": note_title,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    _write_undo_state(entries)
+
+
+def _remove_undo_entry(commit_hash: str) -> None:
+    state = _load_undo_state()
+    entries = state.get("entries", []) if isinstance(state, dict) else []
+    entries = [e for e in _normalize_undo_entries(entries) if e.get("delete_commit_hash") != commit_hash]
+    _write_undo_state(entries)
 
 
 def _safe_markdown_path(markdown_path: str) -> Path | None:
@@ -147,14 +210,7 @@ def _git_autocommit_delete(note_id: str, note_title: str, removed_file: Path | N
     }
 
     if commit_hash:
-        _write_undo_state(
-            {
-                "delete_commit_hash": commit_hash,
-                "note_id": note_id,
-                "note_title": note_title,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        _append_undo_entry(commit_hash=commit_hash, note_id=note_id, note_title=note_title)
 
     return result
 
@@ -171,7 +227,9 @@ def _git_revert_delete(commit_hash: str | None = None) -> dict:
     target = (commit_hash or "").strip()
     if not target:
         state = _load_undo_state()
-        target = str(state.get("delete_commit_hash") or "").strip()
+        entries = state.get("entries", []) if isinstance(state, dict) else []
+        if entries:
+            target = str(entries[0].get("delete_commit_hash") or "").strip()
 
     if not target:
         return {
@@ -199,7 +257,7 @@ def _git_revert_delete(commit_hash: str | None = None) -> dict:
         }
 
     head = _git_run(["rev-parse", "--short", "HEAD"])
-    _clear_undo_state()
+    _remove_undo_entry(target)
 
     return {
         "ok": True,
@@ -248,7 +306,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             commit_hash = str(body.get("commit_hash") or "").strip()
             result = _git_revert_delete(commit_hash if commit_hash else None)
             status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
-            self._send_json(result, status=status)
+            payload = {**result, "undo_state": _load_undo_state()}
+            self._send_json(payload, status=status)
             return
 
         self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
@@ -325,6 +384,7 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(f"Serving {ROOT} on http://{args.host}:{args.port}")
     print(f"Auto git commit on delete: {'ON' if AUTO_GIT_COMMIT else 'OFF'}")
+    print(f"Undo history limit: {UNDO_MAX_ENTRIES}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

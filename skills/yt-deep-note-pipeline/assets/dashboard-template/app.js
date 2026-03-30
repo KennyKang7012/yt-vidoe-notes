@@ -5,11 +5,12 @@ const tagFilters = document.getElementById("tagFilters");
 const noteCount = document.getElementById("noteCount");
 const undoPinnedBtn = document.getElementById("undoPinnedBtn");
 const undoInfo = document.getElementById("undoInfo");
+const undoSelect = document.getElementById("undoSelect");
 
 let allNotes = [];
 let activeTag = "";
 let selectedNoteId = "";
-let undoState = { can_undo: false };
+let undoState = { can_undo: false, entries: [] };
 
 const API_BASE = "../../../../api";
 
@@ -22,14 +23,34 @@ const readMarkdown = async (path) => {
 const escapeHtml = (text) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-const renderUndoPanel = () => {
-  if (!undoPinnedBtn || !undoInfo) return;
+const buildUndoLabel = (entry) => {
+  const title = entry.note_title || entry.note_id || "Unknown note";
+  const hash = (entry.delete_commit_hash || "").slice(0, 7);
+  return `${title} (${hash})`;
+};
 
-  if (undoState && undoState.can_undo) {
+const renderUndoPanel = () => {
+  if (!undoPinnedBtn || !undoInfo || !undoSelect) return;
+
+  const entries = Array.isArray(undoState.entries) ? undoState.entries : [];
+  undoSelect.innerHTML = "";
+
+  if (entries.length > 0) {
+    for (const entry of entries) {
+      const option = document.createElement("option");
+      option.value = entry.delete_commit_hash || "";
+      option.textContent = buildUndoLabel(entry);
+      undoSelect.appendChild(option);
+    }
+    undoSelect.disabled = false;
     undoPinnedBtn.disabled = false;
-    const title = undoState.note_title || undoState.note_id || "recent deleted note";
-    undoInfo.textContent = `可還原：${title}`;
+    undoInfo.textContent = `可還原 ${entries.length} 筆刪除（最多 ${undoState.max_entries || 10} 筆）。`;
   } else {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "目前沒有可還原的刪除";
+    undoSelect.appendChild(option);
+    undoSelect.disabled = true;
     undoPinnedBtn.disabled = true;
     undoInfo.textContent = "目前沒有可還原的刪除。";
   }
@@ -40,9 +61,9 @@ const loadUndoState = async () => {
     const resp = await fetch(`${API_BASE}/revert-delete-state`);
     if (!resp.ok) throw new Error("Failed to load undo state");
     const data = await resp.json();
-    undoState = data || { can_undo: false };
+    undoState = data || { can_undo: false, entries: [] };
   } catch {
-    undoState = { can_undo: false };
+    undoState = { can_undo: false, entries: [] };
   }
   renderUndoPanel();
 };
@@ -80,13 +101,18 @@ const render = () => {
 };
 
 const undoDelete = async () => {
-  if (!undoState || !undoState.can_undo) {
+  if (!undoSelect || undoSelect.disabled) {
     window.alert("目前沒有可還原的刪除。");
     return;
   }
 
-  const hash = undoState.delete_commit_hash || "";
-  const ok = window.confirm(`要還原最近一次刪除嗎？\n\nDelete commit: ${hash}`);
+  const hash = (undoSelect.value || "").trim();
+  if (!hash) {
+    window.alert("請先選擇要還原的刪除記錄。");
+    return;
+  }
+
+  const ok = window.confirm(`要還原這筆刪除嗎？\n\nDelete commit: ${hash}`);
   if (!ok) return;
 
   if (undoPinnedBtn) {
@@ -106,7 +132,12 @@ const undoDelete = async () => {
     }
 
     await load();
-    await loadUndoState();
+    if (payload.undo_state) {
+      undoState = payload.undo_state;
+      renderUndoPanel();
+    } else {
+      await loadUndoState();
+    }
 
     detailPanel.innerHTML = `
       <h2>還原完成</h2>
@@ -118,7 +149,7 @@ const undoDelete = async () => {
     await loadUndoState();
   } finally {
     if (undoPinnedBtn) {
-      undoPinnedBtn.textContent = "Undo Delete";
+      undoPinnedBtn.textContent = "Undo Selected";
     }
   }
 };
@@ -161,8 +192,10 @@ const deleteNote = async (note, event) => {
 
     if (payload.undo_state) {
       undoState = payload.undo_state;
+      renderUndoPanel();
+    } else {
+      await loadUndoState();
     }
-    renderUndoPanel();
     render();
   } catch (err) {
     buttons.forEach((btn) => {

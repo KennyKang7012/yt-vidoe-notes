@@ -11,3 +11,5 @@ inputs/audio/
 # OS/editor
 .DS_Store
 Thumbs.db
+
+data/dashboard-undo-state.json

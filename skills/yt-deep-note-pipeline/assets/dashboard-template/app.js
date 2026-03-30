@@ -77,9 +77,13 @@ const deleteNote = async (note, event) => {
 
     if (selectedNoteId === note.id) {
       selectedNoteId = "";
+      const gitMeta = payload.git && payload.git.committed
+        ? `<p class="meta">Git commit: <code>${payload.git.hash}</code></p>`
+        : "";
       detailPanel.innerHTML = `
-        <h2>刪除完成</h2>
-        <p class="meta">已刪除：${note.title}</p>
+        <h2>????</h2>
+        <p class="meta">????${note.title}</p>
+        ${gitMeta}
       `;
     }
 

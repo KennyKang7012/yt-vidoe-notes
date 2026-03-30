@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +19,7 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[3]
 INDEX_PATH = ROOT / "data" / "notes-index.json"
+AUTO_GIT_COMMIT = True
 
 
 def _load_notes() -> list[dict]:
@@ -44,6 +46,70 @@ def _safe_markdown_path(markdown_path: str) -> Path | None:
     except ValueError:
         return None
     return candidate
+
+
+def _git_run(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(ROOT), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def _git_autocommit_delete(note_id: str, note_title: str, removed_file: Path | None) -> dict:
+    if not AUTO_GIT_COMMIT:
+        return {"enabled": False, "committed": False, "reason": "disabled"}
+
+    inside = _git_run(["rev-parse", "--is-inside-work-tree"])
+    if inside.returncode != 0:
+        return {
+            "enabled": True,
+            "committed": False,
+            "reason": "not_a_git_repo",
+            "error": inside.stderr.strip() or inside.stdout.strip(),
+        }
+
+    add_paths = [str(INDEX_PATH.relative_to(ROOT)).replace("\\", "/")]
+    if removed_file is not None:
+        add_paths.append(str(removed_file.relative_to(ROOT)).replace("\\", "/"))
+
+    add_proc = _git_run(["add", "--", *add_paths])
+    if add_proc.returncode != 0:
+        return {
+            "enabled": True,
+            "committed": False,
+            "reason": "git_add_failed",
+            "error": add_proc.stderr.strip() or add_proc.stdout.strip(),
+        }
+
+    staged = _git_run(["diff", "--cached", "--quiet"])
+    if staged.returncode == 0:
+        return {"enabled": True, "committed": False, "reason": "no_changes"}
+
+    message = f"chore(notes): delete {note_id}"
+    commit_proc = _git_run(["commit", "-m", message])
+    if commit_proc.returncode != 0:
+        return {
+            "enabled": True,
+            "committed": False,
+            "reason": "git_commit_failed",
+            "error": commit_proc.stderr.strip() or commit_proc.stdout.strip(),
+        }
+
+    rev = _git_run(["rev-parse", "--short", "HEAD"])
+    commit_hash = rev.stdout.strip() if rev.returncode == 0 else ""
+
+    return {
+        "enabled": True,
+        "committed": True,
+        "hash": commit_hash,
+        "message": message,
+        "note_id": note_id,
+        "note_title": note_title,
+    }
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
@@ -86,7 +152,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         notes = [n for n in notes if str(n.get("id")) != note_id]
         _write_notes(notes)
 
-        removed_file = None
+        removed_file: Path | None = None
         markdown_path = str(target.get("markdown_path") or "")
         if markdown_path:
             abs_md = _safe_markdown_path(markdown_path)
@@ -98,27 +164,44 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
             if abs_md.exists():
                 abs_md.unlink()
-                removed_file = str(abs_md)
+                removed_file = abs_md
+
+        git_result = _git_autocommit_delete(
+            note_id=note_id,
+            note_title=str(target.get("title") or ""),
+            removed_file=removed_file,
+        )
 
         self._send_json(
             {
                 "ok": True,
                 "deleted_id": note_id,
                 "remaining": len(notes),
-                "removed_markdown_file": removed_file,
+                "removed_markdown_file": str(removed_file) if removed_file else None,
+                "git": git_result,
             }
         )
 
 
 def main() -> None:
+    global AUTO_GIT_COMMIT
+
     parser = argparse.ArgumentParser(description="Serve dashboard + notes API")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8010)
+    parser.add_argument(
+        "--no-auto-git-commit",
+        action="store_true",
+        help="Disable automatic git commit after deleting notes",
+    )
     args = parser.parse_args()
+
+    AUTO_GIT_COMMIT = not args.no_auto_git_commit
 
     os.chdir(ROOT)
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(f"Serving {ROOT} on http://{args.host}:{args.port}")
+    print(f"Auto git commit on delete: {'ON' if AUTO_GIT_COMMIT else 'OFF'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
